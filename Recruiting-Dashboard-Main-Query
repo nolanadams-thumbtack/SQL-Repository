@@ -1,0 +1,210 @@
+SELECT DISTINCT *,  
+CASE
+  WHEN final_stage = stage_name and application_status = 'rejected' THEN "rejected"
+  WHEN final_stage = stage_name and application_status = 'active' THEN 'active'
+  ELSE 'passed'
+END AS stage_status
+  FROM (
+SELECT DISTINCT DATE(TIMESTAMP_MILLIS((A.applied_at-32400000))) AS applied_at, A.status as application_status, A.prospect, DATE(TIMESTAMP_MILLIS((A.rejected_at-32400000))) AS rejected_at, A.stage_name AS final_stage, CASE WHEN A.referrer_id IS NULL THEN False ELSE True END AS Referred, R.name as referrer,
+O.status AS offer_status, DATE(TIMESTAMP_MILLIS((O.created_at))) AS offer_created_date, DATE(TIMESTAMP_MILLIS((O.resolved_at))) AS offer_resolution_date,
+DATE(TIMESTAMP_MILLIS((O.start_date))) AS start_date, DATE(TIMESTAMP_MILLIS((O.sent_at))) AS offer_sent_date, CASE WHEN O.updated_at <> O.created_at THEN DATE(TIMESTAMP_MILLIS((O.updated_at))) END AS offer_update_at_date,
+O_C_F.offer_salary, O_C_F.offer_notes , O_C_F.offer_options , O_C_F.offer_location , O_C_F.offer_rsu , O_C_F.offer_sign_on , O_C_F.offer_expiration , O_C_F.offer_equity , O_C_F.offer_employment_type, O_C_F.offer_level, O_C_F.offer_title,
+R_R.name as rejection_reason, R_R.type AS rejection_type,
+J.name AS job_title, J.status AS job_status, J.level AS job_level, D.name AS department, J_C_F.sub_department, J.confidential AS confidential_job, DATE(TIMESTAMP_MILLIS((J.opened_at-32400000))) AS job_opened_at, J.id AS job_id,
+DATE(TIMESTAMP_MILLIS((J.closed_at-32400000))) AS job_closed_at, J_C_F.bonus, J_C_F.level, J_C_F.salary, J_C_F.employment_type,  J_C_F.cost_center,  J_C_F.job_group,
+Offi.office AS job_office,
+CASE 
+    WHEN AQ.answer = "Location not listed" THEN AQ2.answer
+    ELSE AQ.answer
+END AS location_question, 
+IFNULL(EA.state,EA.country) AS Workday_location,
+J_P.title as job_post_title, J_P.location AS job_post_location, J_P.live as job_post_status, J_P.job_board_name AS job_post_board_name,
+So.name AS source_name, So.type AS source_type,
+SC.interviewer, SC.submitter, SC.overall_recommendation, DATE(TIMESTAMP_MILLIS((SC.submitted_at-32400000))) as scorecard_submitted, SC.id AS scorecard_id, DATE(TIMESTAMP_MILLIS((SC.scheduled_interview_ended_at-32400000))) AS scheduled_interview_with_scorecards, SC.interview_name as interview_type,
+DATE_DIFF(DATE(TIMESTAMP_MILLIS((SC.submitted_at-32400000))),DATE(TIMESTAMP_MILLIS((SC.scheduled_interview_ended_at-32400000))),DAY) AS scorecard_submission_duration,
+SI.status as interview_status, DATE(TIMESTAMP_MILLIS((SI.scheduled_at-32400000))) AS interview_scheduled_date, DATE(TIMESTAMP_MILLIS((SI.starts_at-32400000))) AS interview_start_date, SI.interview_name, SI.id AS scheduled_interview_id, SI.interview_id, SBU.full_name AS interview_scheduler_name,
+C.first_name, C.last_name, CONCAT(C.first_name," ", C.last_name) AS candidate_name, C.company, C.title AS candidate_title, C.migrated, Edu.school_name, Edu.degree,
+C_C_F.candidate_work_location, C_C_F.candidate_university, C_C_F.candidate_city_state_zip,
+DEI.disability, DEI.gender, DEI.race_ethnicity, DEI.veteran_status,
+C.recruiter, C.coordinator,
+C.id AS candidate_id, A.id as application_id, So.id AS source_id, A_S.stage_exited_at, A_S.stage_entered_at, A_S.candidate_application_order,
+A_S.stage_id, CONCAT(A_S.application_id,"-",A_S.stage_id) AS application_stage_id,A_S.stage_name, A_S.first_date,A_S.last_date, A_S.last_date_entered, A_S.last_date_exited,
+ A_S.stage_duration,A_S.stage_order, A_S.next_stage, A_S.next_stage_start_at, A_S.duration_between_interviews, A_S.total_duration
+FROM( SELECT A_S3.*,
+    LEAD(A_S3.stage_name, 1) OVER
+    (PARTITION BY A_S3.application_id ORDER BY stage_order) AS next_stage, 
+    DATE_DIFF(COALESCE(
+    LEAD(stage_entered_at,1) OVER
+    (PARTITION BY A_S3.application_id ORDER BY stage_order),TIMESTAMP_MILLIS((A.rejected_at-32400000))),
+    last_interview_ended_at,
+    DAY) AS duration_between_interviews,
+    LEAD(stage_entered_at,1) OVER
+    (PARTITION BY A_S3.application_id ORDER BY stage_order) AS next_stage_start_at,
+    DATE_DIFF(last_date,first_date,DAY) AS total_duration,
+    RANK() OVER (PARTITION BY C.id ORDER BY A_S3.last_date) AS candidate_application_order,
+    FROM (
+      SELECT *, RANK() OVER (PARTITION BY A_S2.application_id ORDER BY A_S2.stage_entered_at) AS stage_order,
+              CASE WHEN A_S2.last_date_entered > A_S2.last_date_exited THEN A_S2.last_date_entered
+              ELSE A_S2.last_date_exited 
+              END AS last_date,
+
+          FROM (
+          SELECT A_S1.application_id, A_S1.stage_name, A_S1.stage_id, TIMESTAMP_MILLIS((A_S1.entered_on-32400000)) AS stage_entered_at, TIMESTAMP_MILLIS((A_S1.exited_on-32400000)) AS stage_exited_at, 
+                  DATE_DIFF(IFNULL(DATE(TIMESTAMP_MILLIS((A_S1.exited_on-32400000))),CURRENT_DATE),DATE(TIMESTAMP_MILLIS((A_S1.entered_on-32400000))),DAY) AS stage_duration, 
+                  MIN(DATE(TIMESTAMP_MILLIS((A_S1.entered_on-32400000)))) OVER (PARTITION BY A_S1.application_id) AS first_date, 
+                  MAX(DATE(TIMESTAMP_MILLIS((A_S1.entered_on-32400000)))) OVER (PARTITION BY A_S1.application_id) AS last_date_entered, 
+                  MAX(DATE(TIMESTAMP_MILLIS((A_S1.exited_on-32400000))))  OVER (PARTITION BY A_S1.application_id) AS last_date_exited,
+              FROM (
+                  SELECT application_id, stage_name, stage_id, MAX(entered_on) AS entered_on, MAX(exited_on) AS exited_on,
+                      FROM greenhouse.application_stages
+                      WHERE entered_on IS NOT NULL 
+                      AND TIMESTAMP_MILLIS(entered_on-32400000) >= '2019-01-01 00:00:00'
+                      GROUP BY application_id, stage_name, stage_id
+                  ) A_S1
+              ) A_S2
+      ) A_S3
+LEFT JOIN greenhouse.applications A
+  ON A_S3.application_id = A.id
+LEFT JOIN greenhouse.candidates C
+  ON A.candidate_id = C.id
+LEFT JOIN (
+    SELECT DISTINCT
+    MIN( TIMESTAMP_MILLIS((SC.scheduled_interview_ended_at-32400000))) AS first_interview_ended_at,
+    MAX( TIMESTAMP_MILLIS((SC.scheduled_interview_ended_at-32400000))) AS last_interview_ended_at,
+    application_id, stage_name,
+    FROM greenhouse.scorecards SC
+    GROUP BY application_id, stage_name) SC
+  ON A_S3.application_id = SC.application_id AND A_S3.stage_name = SC.stage_name
+  )A_S
+LEFT JOIN greenhouse.applications A
+  ON A_S.application_id = A.id
+LEFT JOIN greenhouse.candidates C
+  ON A.candidate_id = C.id
+LEFT JOIN (SELECT * FROM greenhouse.educations WHERE latest = true) Edu
+  ON C.id = Edu.candidate_id
+LEFT JOIN greenhouse.sources So
+  ON A.source_id = So.id
+LEFT JOIN greenhouse.job_posts J_P
+  ON A.job_post_id = J_P.id
+LEFT JOIN greenhouse.applications_jobs A_J
+  ON A.id = A_J.application_id
+LEFT JOIN greenhouse.jobs J
+  ON A_J.job_id = J.id
+LEFT JOIN greenhouse.referrers R
+  ON A.referrer_id = R.id
+LEFT JOIN employees.employee_info AS EA
+  ON CONCAT(C.first_name, " ",C.last_name) = CONCAT(EA.Legal_First_Name, " ",EA.Legal_Last_Name)
+LEFT JOIN greenhouse.scorecards SC
+  ON A_S.application_id = SC.application_id AND A_S.stage_id = SC.stage_id
+LEFT JOIN greenhouse.scheduled_interviews SI
+  ON A_S.application_id = SI.application_id AND A_S.stage_name = SI.stage_name
+LEFT JOIN greenhouse.users SBU
+  ON SI.scheduled_by_id = SBU.id
+LEFT JOIN 
+  (Select * FROM greenhouse.application_question_answers
+  WHERE question LIKE "Thumbtack currently%") AQ
+    ON A.id = AQ.application_id
+LEFT JOIN 
+    (SELECT * FROM greenhouse.application_question_answers
+    WHERE question LIKE "If you selected%") AS AQ2
+    ON A.id = AQ2.application_id
+LEFT JOIN greenhouse.departments D
+  ON J.department_id = D.id
+LEFT JOIN greenhouse.rejection_reasons R_R
+  ON A.rejection_reason_id = R_R.id
+LEFT JOIN (
+SELECT * 
+FROM (
+SELECT B.id AS application_id,  E_R.disability_status AS disability,
+IFNULL(IFNULL(EA.Gender_Identity, De.gender), E_R.gender) AS gender,
+CASE 
+  WHEN EA.Race_Ethnicity IS NOT NULL THEN IFNULL(De.race_ethnicity,EA.Race_Ethnicity)
+  ELSE IFNULL(De.race_ethnicity, E_R.race)
+END AS race_ethnicity, 
+IFNULL(De.veteran_status,E_R.veteran_status) AS veteran_status,
+FROM 
+(SELECT A.id, CONCAT(C.first_name, " ",C.last_name) AS candidate_name 
+FROM greenhouse.applications A
+LEFT JOIN greenhouse.candidates C
+    ON A.candidate_id = C.id) B
+LEFT JOIN greenhouse.eeoc_responses E_R
+  ON B.id = E_R.application_id
+LEFT JOIN (
+  SELECT application_id, STRING_AGG(gender) AS gender, STRING_AGG(race_ethnicity) AS race_ethnicity, STRING_AGG(veteran_status) AS veteran_status
+  FROM (SELECT A.application_id, 
+    CASE WHEN A.demographic_question_id = 217 THEN B.name END AS gender, 
+    CASE WHEN A.demographic_question_id = 218 THEN B.name END as race_ethnicity,
+    CASE WHEN A.demographic_question_id = 219 THEN B.name END AS veteran_status
+    FROM (SELECT * FROM greenhouse.demographic_answers WHERE demographic_answer_option_id IS NOT NULL) A
+LEFT JOIN greenhouse.demographic_answer_option_translations B
+  ON A.demographic_answer_option_id = B.id
+) B
+GROUP BY application_id ) De
+  ON B.id = De.application_id
+LEFT JOIN employees.employee_info AS EA
+  ON B.candidate_name = EA.Preferred_Name
+) D
+WHERE disability IS NOT NULL 
+OR gender IS NOT NULL 
+OR race_ethnicity IS NOT NULL 
+OR veteran_status IS NOT NULL 
+) DEI
+  ON A.id = DEI.application_id
+LEFT JOIN (SELECT job_id, STRING_AGG(bonus) AS bonus, STRING_AGG(level) AS level, STRING_AGG(salary) AS salary, STRING_AGG(hot_job) AS hot_job, STRING_AGG(options) AS options,
+ STRING_AGG(keywords) AS keywords, STRING_AGG(reward_amount) AS reward_amount,STRING_AGG(sub_department) AS sub_department, STRING_AGG(employment_type) AS employment_type, STRING_AGG(cost_center) AS cost_center, STRING_AGG(job_group) AS job_group, 
+FROM (
+SELECT job_id,
+CASE WHEN custom_field = "Bonus" THEN display_value END AS bonus,
+CASE WHEN custom_field = "Level" THEN display_value END AS level,
+CASE WHEN custom_field = "Salary" THEN display_value END AS salary,
+CASE WHEN custom_field = "Hot Job" THEN display_value END AS hot_job,
+CASE WHEN custom_field = "Options" THEN display_value END AS options,
+CASE WHEN custom_field = "Keywords" THEN display_value END AS keywords,
+CASE WHEN custom_field = "Reward Amount" THEN display_value END AS reward_amount,
+CASE WHEN custom_field = "Employment Type" THEN display_value END AS employment_type,
+CASE WHEN custom_field = "Cost Center" THEN display_value END AS cost_center,
+CASE WHEN custom_field = "Job Group" THEN display_value END AS job_group,
+CASE WHEN custom_field = "Sub Department" THEN display_value END AS sub_department
+FROM greenhouse.job_custom_fields WHERE display_value IS NOT NULL and display_value <> '') b
+GROUP BY job_id) J_C_F
+  ON J.id = J_C_F.job_id
+LEFT JOIN greenhouse.offers O
+  ON A.id = O.application_id
+LEFT JOIN 
+  (SELECT DISTINCT job_id, STRING_AGG(O.name, "; ") AS office
+  FROM greenhouse.jobs_offices JO
+  LEFT JOIN greenhouse.offices O
+    ON JO.office_id = O.id
+GROUP BY job_id) Offi
+  ON J.id = Offi.job_id
+LEFT JOIN (SELECT candidate_id, STRING_AGG(work_location) AS candidate_work_location,STRING_AGG(city_state_zip) AS candidate_city_state_zip,STRING_AGG(university) AS candidate_university
+FROM (
+SELECT candidate_id,
+CASE WHEN custom_field = 'Work Location' THEN display_value END AS work_location,
+CASE WHEN custom_field = 'City/State/Zip' THEN display_value END AS city_state_zip,
+CASE WHEN custom_field = 'University' THEN display_value END AS university
+FROM greenhouse.candidate_custom_fields
+WHERE display_value <> '') b
+GROUP BY candidate_id) C_C_F
+ON C.id = C_C_F.candidate_id
+LEFT JOIN (SELECT offer_id, STRING_AGG(salary_offer) AS offer_salary,STRING_AGG(location_offer) AS offer_location, STRING_AGG(notes_offer) AS offer_notes, STRING_AGG(options_offer) AS offer_options, STRING_AGG(rsu_offer) AS offer_rsu, STRING_AGG(sign_on_offer) AS offer_sign_on, STRING_AGG(offer_expiration) AS offer_expiration, STRING_AGG(equity_offer) AS offer_equity, STRING_AGG(level_offer) AS offer_level, STRING_AGG(title_offer) AS offer_title, STRING_AGG(offer_employment_type) AS  offer_employment_type
+FROM (
+SELECT offer_id,
+CASE WHEN custom_field IN('Salary1', 'Salary') THEN display_value END AS salary_offer,
+CASE WHEN custom_field = 'Notes' THEN display_value END AS notes_offer,
+CASE WHEN custom_field IN('Options', 'Options1') THEN display_value END AS options_offer,
+CASE WHEN custom_field IN('RSUs', 'RSU') THEN display_value END AS rsu_offer,
+CASE WHEN custom_field IN('Sign On Bonus', 'Signon Bonus') THEN display_value END AS sign_on_offer,
+CASE WHEN custom_field = 'Offer Expiration Date' THEN display_value END AS offer_expiration,
+CASE WHEN custom_field ='Level' THEN display_value END AS level_offer,
+CASE WHEN custom_field = 'Employment Type' THEN display_value END AS offer_employment_type,
+CASE WHEN custom_field = 'Equity' THEN display_value END AS equity_offer,
+CASE WHEN custom_field = 'Title' THEN display_value END AS title_offer,
+CASE WHEN custom_field = 'Location (Offer)' THEN display_value END AS location_offer
+FROM greenhouse.offer_custom_fields
+WHERE display_value <> '') b
+GROUP BY offer_id) O_C_F
+  ON O.id = O_C_F.offer_id) a
+WHERE NOT a.job_title LIKE '%poolin%'
+AND NOT a.job_title LIKE '%SaaS%' 
+AND NOT a.job_title LIKE "%prospect%"
